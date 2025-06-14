@@ -12,21 +12,29 @@ from openpyxl.styles import Alignment
 # Configuration
 EXCEL_FILE = "shops_data.xlsx"
 TEMP_IMAGE = "temp_img.jpg"
-MAX_IMAGE_HEIGHT = 300  # pixels (constrains height only)
-IMAGE_COLUMN = 'C'  # Column where images will be placed
-DATA_COLUMNS = ['Shop_ID', 'Region', 'last_updated']  # Other data columns
+MAX_IMAGE_HEIGHT = 300  # pixels
+IMAGE_COLUMN = 'C'  # Column for images
+DATA_COLUMNS = ['Shop_ID', 'Region', 'last_updated']
 
 def load_or_create_excel():
     if os.path.exists(EXCEL_FILE):
-        return load_workbook(EXCEL_FILE)
+        wb = load_workbook(EXCEL_FILE)
+        # Initialize max_width if not exists
+        if not hasattr(wb, 'max_image_width'):
+            wb.max_image_width = 0
+            for sheet in wb:
+                if IMAGE_COLUMN in sheet.column_dimensions:
+                    wb.max_image_width = max(wb.max_image_width, 
+                                           sheet.column_dimensions[IMAGE_COLUMN].width)
+        return wb
     else:
         wb = load_workbook()
         ws = wb.active
         ws.append(DATA_COLUMNS)
-        # Set initial column widths
-        ws.column_dimensions['A'].width = 15  # Shop_ID
-        ws.column_dimensions['B'].width = 20  # Region
-        ws.column_dimensions[IMAGE_COLUMN].width = 30  # Image column (initial)
+        wb.max_image_width = 30  # Initial width
+        ws.column_dimensions['A'].width = 15
+        ws.column_dimensions['B'].width = 20
+        ws.column_dimensions[IMAGE_COLUMN].width = wb.max_image_width
         wb.save(EXCEL_FILE)
         return wb
 
@@ -47,13 +55,12 @@ def save_image_to_excel(shop_id, region, uploaded_file):
             ws.cell(row=row_idx, column=1, value=shop_id)
             ws.cell(row=row_idx, column=2, value=region)
         
-        # Process image (convert RGBA to RGB if needed)
+        # Process image
         img = Image.open(uploaded_file)
         if img.mode == 'RGBA':
             img = img.convert('RGB')
         
-        # Calculate new dimensions maintaining aspect ratio
-        # Only constrain height, let width follow naturally
+        # Calculate dimensions maintaining aspect ratio
         if img.height > MAX_IMAGE_HEIGHT:
             ratio = MAX_IMAGE_HEIGHT / img.height
             new_height = MAX_IMAGE_HEIGHT
@@ -67,34 +74,32 @@ def save_image_to_excel(shop_id, region, uploaded_file):
         # Save temp image
         img.save(TEMP_IMAGE, "JPEG", quality=90)
         
-        # Add to Excel with perfect width matching
-        excel_img = ExcelImage(TEMP_IMAGE)
+        # Calculate required column width (7 pixels ≈ 1 Excel width unit)
+        required_width = max(10, new_width / 7)
         
-        # Convert image width to Excel column width
-        # Excel column width: 1 unit ≈ 0.9cm of 72-point font characters
-        # Approximation: 7 pixels ≈ 1 Excel width unit
-        col_width = max(10, new_width / 7)  # Minimum width 10
+        # Update max width if this image is wider
+        if required_width > wb.max_image_width:
+            wb.max_image_width = required_width
+            # Update all sheets to use new max width
+            for sheet in wb:
+                sheet.column_dimensions[IMAGE_COLUMN].width = wb.max_image_width
         
-        # Set column width to exactly match image width
-        ws.column_dimensions[IMAGE_COLUMN].width = col_width
-        
-        # Set row height (approximate conversion)
-        # Excel row height: 1 point = 1/72 inch ≈ 1.33 pixels
-        row_height = max(15, new_height / 1.33)  # Minimum height 15
+        # Set row height (1.33 pixels ≈ 1 Excel height unit)
+        row_height = max(15, new_height / 1.33)
         ws.row_dimensions[row_idx].height = row_height
         
-        # Add image to cell (will automatically fill the cell width)
-        cell_ref = f"{IMAGE_COLUMN}{row_idx}"
-        ws.add_image(excel_img, cell_ref)
+        # Add image
+        excel_img = ExcelImage(TEMP_IMAGE)
+        ws.add_image(excel_img, f"{IMAGE_COLUMN}{row_idx}")
         
-        # Center align other cells vertically
+        # Center align other cells
         for col in range(1, len(DATA_COLUMNS) + 1):
             if get_column_letter(col) != IMAGE_COLUMN:
                 ws.cell(row=row_idx, column=col).alignment = Alignment(vertical='center')
         
         # Add timestamp
         ws.cell(row=row_idx, column=len(DATA_COLUMNS), 
-               value=datetime.now().strftime("%Y-%m-%d %H:%M:%S")).alignment = Alignment(vertical='center')
+               value=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         
         wb.save(EXCEL_FILE)
         return True
@@ -106,30 +111,22 @@ def save_image_to_excel(shop_id, region, uploaded_file):
         if os.path.exists(TEMP_IMAGE):
             os.remove(TEMP_IMAGE)
 
-def display_excel_data():
-    try:
-        wb = load_or_create_excel()
-        ws = wb.active
-        
-        data = []
-        for row in ws.iter_rows(values_only=True):
-            row_data = list(row[:2]) + [row[-1]] if len(row) > 2 else list(row) + [None]
-            data.append(row_data)
-        
-        df = pd.DataFrame(data, columns=DATA_COLUMNS)
-        return df, wb
-    except Exception as e:
-        st.error(f"Error reading Excel file: {str(e)}")
-        return pd.DataFrame(), None
-
 def main():
     st.title("Shop Photo Upload System")
     
-    st.sidebar.header("Navigation")
-    app_mode = st.sidebar.radio("Go to", ["Upload Photo", "View Data"])
+    # Navigation
+    app_mode = st.sidebar.radio("Navigation", ["Upload Photo", "View Data"])
     
     if app_mode == "Upload Photo":
-        df, _ = display_excel_data()
+        wb = load_or_create_excel()
+        ws = wb.active
+        
+        # Get existing data for dropdowns
+        data = []
+        for row in ws.iter_rows(values_only=True):
+            data.append(row[:len(DATA_COLUMNS)] if row else DATA_COLUMNS)
+        
+        df = pd.DataFrame(data[1:], columns=DATA_COLUMNS[:len(data[0])])
         
         regions = sorted(df["Region"].unique()) if not df.empty else []
         shop_ids = sorted(df["Shop_ID"].unique()) if not df.empty else []
@@ -145,35 +142,32 @@ def main():
         uploaded_file = st.file_uploader("Upload Shop Photo", type=["jpg", "jpeg", "png"])
         
         if uploaded_file is not None:
-            image = Image.open(uploaded_file)
-            st.image(image, caption=f"Preview for Shop {selected_shop}", use_column_width=True)
-            
-            # Show image dimensions
-            st.info(f"Image dimensions: {image.width}px × {image.height}px")
+            img = Image.open(uploaded_file)
+            st.image(img, caption=f"Preview for Shop {selected_shop}")
             
             if st.button("Save Photo"):
                 if save_image_to_excel(selected_shop, selected_region, uploaded_file):
-                    st.success(f"Photo saved successfully for Shop {selected_shop}!")
-                    st.info("Cell width exactly matches image width")
+                    st.success(f"Photo saved! Column width adjusted to {wb.max_image_width:.1f} to fit all images")
                 else:
                     st.error("Failed to save photo")
     
     elif app_mode == "View Data":
-        st.subheader("Shop Data")
+        wb = load_or_create_excel()
+        ws = wb.active
         
-        df, _ = display_excel_data()
+        data = []
+        for row in ws.iter_rows(values_only=True):
+            data.append(row[:len(DATA_COLUMNS)] if row else DATA_COLUMNS)
+        
+        df = pd.DataFrame(data[1:], columns=DATA_COLUMNS[:len(data[0])])
         st.dataframe(df)
         
-        st.markdown("### Download Updated Excel File")
-        if os.path.exists(EXCEL_FILE):
-            with open(EXCEL_FILE, "rb") as f:
-                bytes_data = f.read()
-            st.download_button(
-                label="Download Excel File",
-                data=bytes_data,
-                file_name=EXCEL_FILE,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        st.download_button(
+            "Download Excel File",
+            open(EXCEL_FILE, "rb").read(),
+            EXCEL_FILE,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 if __name__ == "__main__":
     main()
