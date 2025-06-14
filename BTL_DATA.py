@@ -53,7 +53,14 @@ def save_image_to_excel(shop_id, region, uploaded_file):
             ws.cell(row=row_idx, column=1, value=shop_id)
             ws.cell(row=row_idx, column=2, value=region)
         
-        # Process image
+        # Remove existing image if it exists
+        for image in ws._images:
+            if image.anchor._from.col == get_column_letter(3):  # Column C
+                if image.anchor._from.row == row_idx - 1:  # Rows are 0-indexed in openpyxl
+                    ws._images.remove(image)
+                    break
+        
+        # Process new image
         img = Image.open(uploaded_file)
         if img.mode == 'RGBA':
             img = img.convert('RGB')
@@ -84,11 +91,11 @@ def save_image_to_excel(shop_id, region, uploaded_file):
         row_height = max(15, new_height / 1.33)
         ws.row_dimensions[row_idx].height = row_height
         
-        # Add image
+        # Add new image
         excel_img = ExcelImage(TEMP_IMAGE)
         ws.add_image(excel_img, f"{IMAGE_COLUMN}{row_idx}")
         
-        # Add timestamp with proper alignment
+        # Update timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d\n%H:%M:%S")
         timestamp_cell = ws.cell(row=row_idx, column=4, value=timestamp)
         timestamp_cell.alignment = Alignment(
@@ -179,7 +186,7 @@ def main():
             
             if st.button("Save Photo"):
                 if save_image_to_excel(selected_shop, selected_region, uploaded_file):
-                    st.success("Photo saved successfully!")
+                    st.success("Photo saved successfully! (Replaced previous image if existed)")
                     st.info(f"Image column width: {wb.max_image_width:.1f}")
                     
                     # Store current selections
