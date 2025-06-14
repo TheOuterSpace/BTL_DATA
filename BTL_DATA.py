@@ -119,13 +119,13 @@ def save_image_to_excel(shop_id, region, uploaded_file):
 def main():
     st.title("Shop Photo Upload System")
     
-    # Initialize session state for UI reset
-    if 'uploaded_file' not in st.session_state:
-        st.session_state.uploaded_file = None
-    if 'selected_shop' not in st.session_state:
-        st.session_state.selected_shop = None
+    # Initialize session state for reset
+    if 'reset_trigger' not in st.session_state:
+        st.session_state.reset_trigger = False
     if 'selected_region' not in st.session_state:
         st.session_state.selected_region = None
+    if 'selected_shop' not in st.session_state:
+        st.session_state.selected_shop = None
     
     # Navigation
     app_mode = st.sidebar.radio("Navigation", ["Upload Photo", "View Data"])
@@ -148,7 +148,7 @@ def main():
             st.warning("No shop data found. Please add shop data first.")
             return
         
-        # Region selection - use session state to maintain after reset
+        # Region selection
         selected_region = st.selectbox(
             "Select Region",
             regions,
@@ -165,11 +165,12 @@ def main():
             if st.session_state.selected_shop in filtered_shops else 0
         )
         
-        # File uploader - use session state to clear after save
+        # File uploader - key is controlled by reset_trigger
+        uploader_key = "file_uploader_" + str(st.session_state.reset_trigger)
         uploaded_file = st.file_uploader(
             "Upload Shop Photo", 
             type=["jpg", "jpeg", "png"],
-            key="file_uploader"
+            key=uploader_key
         )
         
         if uploaded_file is not None:
@@ -181,16 +182,15 @@ def main():
                     st.success("Photo saved successfully!")
                     st.info(f"Image column width: {wb.max_image_width:.1f}")
                     
-                    # Reset the file uploader while keeping selections
-                    st.session_state.uploaded_file = None
-                    st.session_state.file_uploader = None
-                    st.rerun()  # Refresh the UI
+                    # Store current selections
+                    st.session_state.selected_region = selected_region
+                    st.session_state.selected_shop = selected_shop
+                    
+                    # Trigger UI reset by changing the uploader key
+                    st.session_state.reset_trigger = not st.session_state.reset_trigger
+                    st.rerun()
                 else:
                     st.error("Failed to save photo")
-        
-        # Store current selections in session state
-        st.session_state.selected_region = selected_region
-        st.session_state.selected_shop = selected_shop
     
     elif app_mode == "View Data":
         wb = load_or_create_excel()
