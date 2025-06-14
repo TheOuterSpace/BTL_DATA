@@ -14,27 +14,25 @@ EXCEL_FILE = "shops_data.xlsx"
 TEMP_IMAGE = "temp_img.jpg"
 MAX_IMAGE_HEIGHT = 300  # pixels
 IMAGE_COLUMN = 'C'  # Column for images
+LAST_UPDATED_COLUMN = 'D'  # Column for timestamp
 DATA_COLUMNS = ['Shop_ID', 'Region', 'last_updated']
 
 def load_or_create_excel():
     if os.path.exists(EXCEL_FILE):
         wb = load_workbook(EXCEL_FILE)
-        # Initialize max_width if not exists
         if not hasattr(wb, 'max_image_width'):
-            wb.max_image_width = 0
-            for sheet in wb:
-                if IMAGE_COLUMN in sheet.column_dimensions:
-                    wb.max_image_width = max(wb.max_image_width, 
-                                           sheet.column_dimensions[IMAGE_COLUMN].width)
+            wb.max_image_width = 30  # Default width if not set
         return wb
     else:
         wb = load_workbook()
         ws = wb.active
         ws.append(DATA_COLUMNS)
-        wb.max_image_width = 30  # Initial width
-        ws.column_dimensions['A'].width = 15
-        ws.column_dimensions['B'].width = 20
-        ws.column_dimensions[IMAGE_COLUMN].width = wb.max_image_width
+        # Set initial column widths
+        ws.column_dimensions['A'].width = 15  # Shop_ID
+        ws.column_dimensions['B'].width = 20  # Region
+        ws.column_dimensions[IMAGE_COLUMN].width = 30  # Images
+        ws.column_dimensions[LAST_UPDATED_COLUMN].width = 20  # Timestamp
+        wb.max_image_width = 30
         wb.save(EXCEL_FILE)
         return wb
 
@@ -46,7 +44,7 @@ def save_image_to_excel(shop_id, region, uploaded_file):
         # Find existing row or create new
         row_idx = None
         for idx, row in enumerate(ws.iter_rows(values_only=True), 1):
-            if row[0] == shop_id and row[1] == region:
+            if row and row[0] == shop_id and row[1] == region:
                 row_idx = idx
                 break
         
@@ -80,9 +78,7 @@ def save_image_to_excel(shop_id, region, uploaded_file):
         # Update max width if this image is wider
         if required_width > wb.max_image_width:
             wb.max_image_width = required_width
-            # Update all sheets to use new max width
-            for sheet in wb:
-                sheet.column_dimensions[IMAGE_COLUMN].width = wb.max_image_width
+            ws.column_dimensions[IMAGE_COLUMN].width = wb.max_image_width
         
         # Set row height (1.33 pixels ≈ 1 Excel height unit)
         row_height = max(15, new_height / 1.33)
@@ -92,14 +88,23 @@ def save_image_to_excel(shop_id, region, uploaded_file):
         excel_img = ExcelImage(TEMP_IMAGE)
         ws.add_image(excel_img, f"{IMAGE_COLUMN}{row_idx}")
         
-        # Center align other cells
-        for col in range(1, len(DATA_COLUMNS) + 1):
-            if get_column_letter(col) != IMAGE_COLUMN:
-                ws.cell(row=row_idx, column=col).alignment = Alignment(vertical='center')
+        # Add timestamp with proper alignment
+        timestamp = datetime.now().strftime("%Y-%m-%d\n%H:%M:%S")
+        timestamp_cell = ws.cell(row=row_idx, column=4, value=timestamp)
+        timestamp_cell.alignment = Alignment(
+            vertical='top',
+            wrap_text=True
+        )
         
-        # Add timestamp
-        ws.cell(row=row_idx, column=len(DATA_COLUMNS), 
-               value=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        # Adjust timestamp column width to fit content
+        ws.column_dimensions[LAST_UPDATED_COLUMN].width = max(
+            20,  # Minimum width
+            len("YYYY-MM-DD") + 2  # Enough for date + padding
+        )
+        
+        # Center align other cells vertically
+        for col in [1, 2]:  # Shop_ID and Region columns
+            ws.cell(row=row_idx, column=col).alignment = Alignment(vertical='center')
         
         wb.save(EXCEL_FILE)
         return True
@@ -147,7 +152,8 @@ def main():
             
             if st.button("Save Photo"):
                 if save_image_to_excel(selected_shop, selected_region, uploaded_file):
-                    st.success(f"Photo saved! Column width adjusted to {wb.max_image_width:.1f} to fit all images")
+                    st.success("Photo saved successfully!")
+                    st.info(f"Image column width: {wb.max_image_width:.1f}")
                 else:
                     st.error("Failed to save photo")
     
