@@ -119,6 +119,14 @@ def save_image_to_excel(shop_id, region, uploaded_file):
 def main():
     st.title("Shop Photo Upload System")
     
+    # Initialize session state for UI reset
+    if 'uploaded_file' not in st.session_state:
+        st.session_state.uploaded_file = None
+    if 'selected_shop' not in st.session_state:
+        st.session_state.selected_shop = None
+    if 'selected_region' not in st.session_state:
+        st.session_state.selected_region = None
+    
     # Navigation
     app_mode = st.sidebar.radio("Navigation", ["Upload Photo", "View Data"])
     
@@ -140,11 +148,29 @@ def main():
             st.warning("No shop data found. Please add shop data first.")
             return
         
-        selected_region = st.selectbox("Select Region", regions)
-        filtered_shops = df[df["Region"] == selected_region]["Shop_ID"].unique()
-        selected_shop = st.selectbox("Select Shop ID", filtered_shops)
+        # Region selection - use session state to maintain after reset
+        selected_region = st.selectbox(
+            "Select Region",
+            regions,
+            index=regions.index(st.session_state.selected_region) 
+            if st.session_state.selected_region in regions else 0
+        )
         
-        uploaded_file = st.file_uploader("Upload Shop Photo", type=["jpg", "jpeg", "png"])
+        # Shop selection filtered by region
+        filtered_shops = df[df["Region"] == selected_region]["Shop_ID"].unique()
+        selected_shop = st.selectbox(
+            "Select Shop ID",
+            filtered_shops,
+            index=filtered_shops.tolist().index(st.session_state.selected_shop) 
+            if st.session_state.selected_shop in filtered_shops else 0
+        )
+        
+        # File uploader - use session state to clear after save
+        uploaded_file = st.file_uploader(
+            "Upload Shop Photo", 
+            type=["jpg", "jpeg", "png"],
+            key="file_uploader"
+        )
         
         if uploaded_file is not None:
             img = Image.open(uploaded_file)
@@ -154,8 +180,17 @@ def main():
                 if save_image_to_excel(selected_shop, selected_region, uploaded_file):
                     st.success("Photo saved successfully!")
                     st.info(f"Image column width: {wb.max_image_width:.1f}")
+                    
+                    # Reset the file uploader while keeping selections
+                    st.session_state.uploaded_file = None
+                    st.session_state.file_uploader = None
+                    st.rerun()  # Refresh the UI
                 else:
                     st.error("Failed to save photo")
+        
+        # Store current selections in session state
+        st.session_state.selected_region = selected_region
+        st.session_state.selected_shop = selected_shop
     
     elif app_mode == "View Data":
         wb = load_or_create_excel()
